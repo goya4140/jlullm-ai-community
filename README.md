@@ -64,3 +64,5 @@ Pages 使用 `main` 分支的 `/docs` 目录。维护者修改内容后运行构
 ## 设计参考
 
 日报的信息组织参考 [AgentHub 日报](https://hqhq1025.github.io/agent_hub/daily/2026-10-19/group-1/)，本站的界面、内容模型与维护工具独立实现。
+
+页面视觉参照 [LifeLibra Lab](https://github.com/goya4140/LifeLibra-Lab) 的白底蓝色、宽留白与研究图片布局。首页研究桌图片复用自该参考仓库的 `website/public/hero-research-table.png`；JLULLM 标识、站点文案、日报与工作台独立维护。
