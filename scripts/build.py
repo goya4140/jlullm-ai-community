@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Build the JLULLM public site using Python's standard library only."""
+from pathlib import Path
+from datetime import date
+from html import escape as e
+from urllib.parse import urlparse
+import json, shutil, re, sys
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / 'docs'
+SLUG = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
+
+def safe_json(value):
+    return json.dumps(value, ensure_ascii=False).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
+
+def valid_url(url):
+    return isinstance(url,str) and urlparse(url).scheme in ('http','https') and bool(urlparse(url).netloc)
+
+def validate(d):
+    for key in ('id','title','date','source_type','status','topics'):
+        if not d.get(key): raise ValueError(f'Missing {key}')
+    if not SLUG.fullmatch(d['id']): raise ValueError('id must be a lowercase URL slug')
+    date.fromisoformat(d['date'])
+    if d.get('event_date'): date.fromisoformat(d['event_date'])
+    if d['source_type'] not in ('chat','recording'): raise ValueError('Unknown source_type')
+    if d['status'] not in ('draft','published'): raise ValueError('Unknown status')
+    if d['status']=='published' and not d.get('reviewed_by','').strip(): raise ValueError('Published digest needs reviewed_by')
+    for key in ('subtitle','summary','source_note','duration','reviewed_by'):
+        if key in d and not isinstance(d[key],str): raise ValueError(f'{key} must be text')
+    if not isinstance(d.get('tags',[]),list) or any(not isinstance(t,str) for t in d.get('tags',[])): raise ValueError('tags must be text list')
+    if not isinstance(d.get('sources',[]),list): raise ValueError('sources must be a list')
+    if not isinstance(d.get('followups',[]),list): raise ValueError('followups must be a list')
+    for action in d.get('followups',[]):
+        if not isinstance(action,dict) or not isinstance(action.get('kind'),str) or not isinstance(action.get('text'),str): raise ValueError('Followup needs kind and text')
+    if not isinstance(d['topics'],list): raise ValueError('topics must be a list')
+    ids=set()
+    for t in d['topics']:
+        if not SLUG.fullmatch(t.get('id','')) or t['id'] in ids: raise ValueError('Topic IDs must be unique slugs')
+        ids.add(t['id'])
+        for key in ('time_range','editor_note'):
+            if key in t and not isinstance(t[key],str): raise ValueError(f'{key} must be text')
+        for key in ('quotes','links'):
+            if not isinstance(t.get(key,[]),list): raise ValueError(f'{key} must be a list')
+        if not t.get('title') or not t.get('category'): raise ValueError('Topic needs title and category')
+        if not isinstance(t.get('paragraphs'),list) or not all(isinstance(x,str) and x.strip() for x in t['paragraphs']) or not t['paragraphs']: raise ValueError('Topic needs nonempty paragraphs')
+        for link in t.get('links',[]):
+            if not valid_url(link.get('url')) or not link.get('title'): raise ValueError('Links need a title and http(s) URL')
+        for q in t.get('quotes',[]):
+            if not q.get('text') or not q.get('speaker'): raise ValueError('Quote needs text and speaker')
+    for link in d.get('sources',[]):
+        if not valid_url(link.get('url')) or not link.get('title'): raise ValueError('Sources need a title and http(s) URL')
+    return d
+
+def badge(d): return '录音整理' if d['source_type']=='recording' else '群聊精选'
+
+def digest_card(d, prefix='', featured=False):
+    tags=''.join(f'<span class="tag">{e(t)}</span>' for t in d.get('tags',[])[:3])
+    return f'''<a class="digest-card {'featured' if featured else ''}" href="{prefix}daily/{e(d['id'])}/"><div class="card-top"><span class="pill">{badge(d)}</span><time>{e(d['date'])}</time></div><h3>{e(d['title'])}</h3><p>{e(d.get('subtitle',''))}</p><div class="tags">{tags}</div><div class="card-bottom"><span>{len(d['topics'])} 个话题 · {'录音 '+e(d.get('duration','')) if d['source_type']=='recording' else '社区讨论'}</span><span class="arrow">↗</span></div></a>'''
+
+def layout(title, content, page='home', prefix='', scripts='', description=None):
+    site=json.loads((ROOT/'content/site.json').read_text())
+    nav=[('home','首页',''),('daily','社区日报','daily/'),('workbench','整理工作台','workbench/'),('about','关于社区','about/')]
+    links=''.join('<a href="'+prefix+(path or './')+'"'+(' aria-current="page"' if page==key else '')+'>'+label+'</a>' for key,label,path in nav)
+    return f'''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="{e(description or site['description'],quote=True)}"><meta name="theme-color" content="#f4f5ef"><title>{e(title)} · JLULLM AI 社区</title><link rel="icon" href="{prefix}assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="{prefix}assets/style.css"></head><body><a class="skip" href="#main">跳到正文</a><header class="site-header"><a class="logo" href="{prefix or './'}" aria-label="JLULLM 首页"><span class="logo-icon">J<span>↗</span></span><span>JLULLM<small>AI COMMUNITY</small></span></a><nav aria-label="主导航">{links}</nav><a class="github-link" href="{site['repository']}" target="_blank" rel="noopener">GitHub <span>↗</span></a></header><main id="main">{content}</main><footer class="site-footer"><a class="footer-brand" href="{prefix or './'}">JLULLM<span>让讨论留下来，让想法发生。</span></a><div><a href="{prefix}daily/">阅读日报</a><a href="{prefix}workbench/">贡献一期</a><a href="{site['repository']}" target="_blank" rel="noopener">GitHub ↗</a></div><p>JLULLM AI 社区 · 共同学习，持续记录<br>内容保留不同观点；编辑评论与讨论原文分别标注。</p></footer>{scripts}</body></html>'''
+
+def home(ds):
+    latest=ds[0] if ds else None
+    issue_count=f'{len(ds):03d}'
+    right=f'''<div class="feature-kicker"><span class="live-dot"></span> 最新讨论 / ISSUE {issue_count}</div>{digest_card(latest,featured=True)}''' if latest else '<p>第一期日报正在路上。</p>'
+    latest_note=(f'录音 {e(latest.get("duration",""))} 的交流，可以留下什么？' if latest and latest['source_type']=='recording' else '一场讨论，可以留下什么？')
+    topic_note=(f'{len(latest["topics"])} 个话题，一份共同记忆 ↘' if latest else '从一次交流开始 ↘')
+    topics=['大模型与后训练','Agent 与工具','具身智能','推理与系统','研究方法','AI 应用实践']
+    topics_html=''.join(f'<span>{e(t)}</span>' for t in topics)
+    return layout('首页',f'''<section class="hero wrap"><div class="hero-copy"><div class="eyebrow"><span class="live-dot"></span> IDEAS MEET PRACTICE</div><h1>一起理解 AI，<br>一起把想法<br><span class="highlight">做出来<span class="spark">✳</span></span></h1><p>这里是 JLULLM AI 社区。<br>聊研究，也聊实践；关注模型，也关注人。<br>让一次交流，成为下一次探索的起点。</p><div class="hero-actions"><a class="button dark" href="daily/">读最新一期 <span>↗</span></a><a class="text-link" href="about/">认识社区 <span>→</span></a></div><div class="hero-foot"><span class="mini-mark">J</span><span>保持好奇 · 分享经验 · 动手验证</span></div></div><div class="hero-feature">{right}<div class="feature-note"><span>{latest_note}</span><span>{topic_note}</span></div></div></section><div class="topic-strip"><div class="wrap">{topics_html}</div></div><section class="wrap section"><div class="section-heading"><div><div class="eyebrow">THE COMMUNITY JOURNAL</div><h2>把值得的讨论，留下来。</h2></div><a class="text-link" href="daily/">全部日报 ↗</a></div><div class="journal-grid">{digest_card(latest) if latest else ''}<a class="contribute-card" href="workbench/"><div class="eyebrow">NEXT ISSUE / 由你接棒</div><div class="outline-plus">＋</div><h3>下一期，来自你的分享。</h3><p>一段群聊，一次线下讨论，一场语音交流。<br>把散落的思考，整理成大家都能读的日报。</p><span class="text-link">打开整理工作台 ↗</span></a></div></section><section class="workflow-section"><div class="wrap"><div class="section-heading"><div><div class="eyebrow">FROM CONVERSATION TO KNOWLEDGE</div><h2>从聊过，到留下，再到做出来。</h2></div><p>用相同的结构，记录每一次新的发现。</p></div><div class="flow-grid"><div><span>01 / 收集</span><h3>把讨论带进来</h3><p>群聊记录或录音转写，保留时间与上下文。选择可以公开的部分。</p></div><div><span>02 / 整理</span><h3>把观点串起来</h3><p>用模板提炼主题，保留分歧与依据，再由编辑核对内容。</p></div><div><span>03 / 延续</span><h3>把问题接下去</h3><p>发布日报，积累资料，让待验证的想法成为下一次实践。</p></div></div><a class="button dark" href="workbench/">从一份模板开始 ↗</a></div></section><section class="wrap community-line"><div class="eyebrow">OPEN TO CURIOSITY</div><h2>带着问题来，<br>带着新的可能离开。</h2><p>无论你正在读第一篇论文，<br>还是已经在搭建自己的 Agent，<br>都可以从分享一个具体问题开始。</p><a class="text-link" href="{json.loads((ROOT/'content/site.json').read_text())['repository']}/discussions" target="_blank" rel="noopener">去 GitHub 参与讨论 ↗</a></section>''')
+
+def archive(ds):
+    cards=''.join(digest_card(d,'../') for d in ds)
+    data=[{'id':d['id'],'title':d['title'],'subtitle':d.get('subtitle',''),'summary':d.get('summary',''),'tags':d.get('tags',[]),'type':d['source_type'],'date':d['date'],'topic_text':' '.join(t['title']+' '+' '.join(t['paragraphs']) for t in d['topics'])} for d in ds]
+    return layout('社区日报',f'''<section class="wrap page-intro"><div class="eyebrow">COMMUNITY JOURNAL</div><h1>每次交流，<br>都值得有个回响。</h1><p>在这里，翻阅社区的讨论、实践与思考。按整理日期归档。</p></section><section class="wrap archive-section"><div class="archive-tools"><div class="filter-tabs" role="group" aria-label="内容类型"><button class="active" data-filter="all" aria-pressed="true">全部</button><button data-filter="chat" aria-pressed="false">群聊精选</button><button data-filter="recording" aria-pressed="false">录音整理</button></div><label class="search-box"><span>⌕</span><input id="search" type="search" aria-label="搜索日报" placeholder="搜索标题、话题或关键词"></label></div><div class="results-line" id="results" aria-live="polite">共 {len(ds)} 期日报</div><div class="archive-grid" id="digest-list">{cards}</div><div class="empty-state" id="empty" hidden><span>⌕</span><h3>这里暂时没有对应的日报</h3><p>试试其他关键词，或把这次讨论整理成新一期。</p><button class="button dark" id="reset-filters">查看全部日报</button></div><div class="archive-cta"><p>有一段值得留下的讨论？</p><a class="text-link" href="../workbench/">整理成下一期 ↗</a></div></section>''',page='daily',prefix='../',scripts=f'<script type="application/json" id="digest-data">{safe_json(data)}</script><script src="../assets/archive.js" defer></script>')
+
+def detail(d):
+    topic_nav=''.join(f'<a href="#{e(t["id"])}"><span>{i:02d}</span>{e(t["category"])}</a>' for i,t in enumerate(d['topics'],1))
+    parts=[]
+    for i,t in enumerate(d['topics'],1):
+        ps=''.join(f'<p>{e(p)}</p>' for p in t['paragraphs'])
+        quotes=''.join(f'<blockquote><p>{e(q["text"])}</p><cite>{e(q["speaker"])}'+(' · '+e(q['time']) if q.get('time') else '')+'</cite></blockquote>' for q in t.get('quotes',[]))
+        links=''.join(f'<a href="{e(l["url"],quote=True)}" target="_blank" rel="noopener">{e(l["title"])} ↗</a>' for l in t.get('links',[]))
+        note=f'<aside class="editor-note"><b>AI 锐评 / 编辑评论</b><p>{e(t["editor_note"])}</p></aside>' if t.get('editor_note') else ''
+        extra=f'<details><summary>查看讨论摘录</summary>{quotes}<small>摘录依来源整理，删去部分重复口头语；公开范围见本期来源说明。</small></details>' if quotes else ''
+        parts.append(f'<article class="topic-article" id="{e(t["id"])}"><div class="eyebrow">{i:02d} / {e(t["category"])}</div><h2>{e(t["title"])}</h2><div class="article-time">{e(t.get("time_range",""))}</div>{ps}{note}{extra}<div class="related-links">{links}</div></article>')
+    actions=''.join(f'<li><span>{e(a["kind"])}</span>{e(a["text"])}</li>' for a in d.get('followups',[]))
+    source_links=''.join(f'<li><a href="{e(l["url"],quote=True)}" target="_blank" rel="noopener">{e(l["title"])}</a></li>' for l in d.get('sources',[]))
+    public_sources=f'<ul>{source_links}</ul>' if source_links else ''
+    content=f'''<div class="wrap reading-top"><a class="text-link" href="../">← 返回日报目录</a><button class="small-button" id="print-page">打印 / 保存 PDF</button></div><div class="wrap reading-layout"><nav class="reading-nav" aria-label="本期话题"><b>本期目录</b>{topic_nav}</nav><div class="reading-body"><header class="article-header"><div class="eyebrow">{badge(d)} · {e(d['date'])}</div><h1>{e(d['title'])}</h1><p class="article-subtitle">{e(d.get('subtitle',''))}</p><div class="article-meta">{len(d['topics'])} 个话题 {'· '+e(d['duration']) if d.get('duration') else ''} · 审核：{e(d['reviewed_by'])}</div><div class="source-note">{e(d.get('source_note',''))}</div></header>{''.join(parts)}<section class="followups"><div class="eyebrow">KEEP THE CONVERSATION GOING</div><h2>把讨论接下去</h2><ul>{actions}</ul>{public_sources}<p class="muted">文中预测与经验归属于发言者。相关技术说法未经独立事实核查；AI 锐评为编辑评论。</p></section><div class="article-next"><a href="../">← 更多社区日报</a><a href="../../workbench/">用模板贡献一期 ↗</a></div></div></div>'''
+    return layout(d['title'],content,page='daily',prefix='../../',description=d.get('summary'),scripts='<script src="../../assets/article.js" defer></script>')
+
+def workbench():
+    templates={k:json.loads((ROOT/f'templates/{k}.json').read_text()) for k in ('chat','recording')}
+    return layout('整理工作台','''<section class="wrap page-intro compact"><div class="eyebrow">COMMUNITY EDITOR'S DESK</div><h1>让好讨论，<span class="highlight">成为下一期。</span></h1><p>选一份模板，带上你的材料。把 AI 初稿变成可以留下来的社区记录。</p></section><section class="wrap workbench"><div class="workspace-main"><div class="step-label">01 / 准备本期材料</div><div class="source-picker" role="group" aria-label="选择材料类型"><button class="source-option active" data-source="chat" aria-pressed="true"><span>↔</span><strong>聊天记录</strong><small>保留消息时间、说话人与上下文</small></button><button class="source-option" data-source="recording" aria-pressed="false"><span>◉</span><strong>录音转写</strong><small>保留时间标记、发言人和不确定词</small></button></div><div class="form-grid"><label>本期标题<input id="issue-title" placeholder="例如：聊聊个人 Agent 的主动交互"></label><label>整理日期<input id="issue-date" type="date"></label></div><label class="field-label">原始材料<textarea id="source-text" rows="9" placeholder="粘贴群聊记录或录音转写……请先删除不适合公开的信息。"></textarea></label><p class="form-note">材料只在当前浏览器中处理，不上传服务器，也不会自动保存。录音请先在常用工具中转写成文字。</p><div class="button-row"><button class="button dark" id="make-prompt">生成整理提示词 ↗</button><a class="button outline" id="download-template" href="../templates/chat.json" download>下载 JSON 模板 ↓</a></div><div id="prompt-panel" hidden><label class="field-label">把以下提示词复制到你常用的 AI<textarea id="prompt-output" rows="10" readonly></textarea></label><div class="button-row"><button class="small-button" id="copy-prompt">复制提示词</button><button class="small-button" id="save-prompt">下载提示词</button></div></div><div class="workspace-divider"></div><div class="step-label">02 / 导入初稿，预览与核对</div><p>将 AI 返回的 JSON 粘贴到下方，或从文件导入。这里负责排版和检查，不调用模型生成总结。</p><label class="field-label">日报 JSON<textarea id="digest-json" rows="8" placeholder='{"title": "本期标题", "topics": [...]}'></textarea></label><div class="button-row"><button class="button dark" id="preview-digest">预览初稿 ↗</button><label class="button outline file-label">导入 JSON<input id="import-json" type="file" accept=".json,application/json"></label><button class="small-button" id="load-example">载入首期示例</button></div><div class="status-message" id="workbench-status" role="status" aria-live="polite"></div><section class="draft-preview" id="draft-preview" hidden aria-label="日报预览"></section><div class="review-panel" id="review-panel" hidden><h3>03 / 编辑审核与导出</h3><label class="check-label"><input type="checkbox" id="review-quotes">原文、说话人、时间与来源已核对</label><label class="check-label"><input type="checkbox" id="review-privacy">已确认正文、摘录与链接可以公开</label><label class="check-label"><input type="checkbox" id="review-claims">事实、个人观点、预测和编辑评论已区分</label><label class="field-label">审核署名<input id="reviewer" placeholder="填写编辑名字或团队署名"></label><div class="button-row"><button class="button outline" id="export-draft">导出草稿 JSON</button><button class="button dark" id="export-reviewed" disabled>导出已审核 JSON ↓</button></div><p class="form-note">导出文件后提交到仓库的 content/digests/，运行构建并推送。导出操作不会直接修改线上网站。任何内容改动后都需要重新预览、重新审核。</p></div></div><aside class="workbench-sidebar"><div class="side-card"><div class="eyebrow">写一份值得读的日报</div><h3>留住讨论的来龙去脉。</h3><ol><li><b>按主题，而非按时间抄写</b><span>把相关观点组织成读者能理解的脉络。</span></li><li><b>保留不同意见</b><span>谁提出问题，谁给出经验，哪里还没有答案。</span></li><li><b>让结论可以追溯</b><span>摘录附时间；不确定的人名、数字不要猜。</span></li><li><b>把后续行动单独记下</b><span>分清现场承诺与编辑建议，不替别人派任务。</span></li></ol></div><div class="side-card lime"><div class="eyebrow">模板工具箱</div><a href="../templates/chat.json" download>聊天日报 JSON ↓</a><a href="../templates/recording.json" download>录音日报 JSON ↓</a><a href="../templates/chat-prompt.md" download>聊天整理提示词 ↓</a><a href="../templates/recording-prompt.md" download>录音整理提示词 ↓</a><a href="https://github.com/goya4140/jlullm-ai-community/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">维护与发布说明 ↗</a></div></aside></section>''',page='workbench',prefix='../',scripts=f'<script type="application/json" id="template-data">{safe_json(templates)}</script><script src="../assets/workbench.js" defer></script>')
+
+def about():
+    return layout('关于社区','''<section class="wrap page-intro"><div class="eyebrow">HELLO, WE ARE JLULLM</div><h1>好奇心把我们聚在一起，<br>实践让讨论继续。</h1><p>JLULLM AI 社区是一个围绕大模型、智能体与 AI 实践持续交流的地方。<br>我们希望把聊天中的灵感、研究中的困惑、动手后的经验，变成可以分享和复用的知识。</p></section><section class="wrap about-grid"><div><div class="eyebrow">WHAT WE CARE ABOUT</div><h2>关注技术，也关注<br>技术如何进入真实生活。</h2><p>我们聊模型与后训练，聊 Agent 与工具，聊推理加速和具身智能，也聊怎样选题、怎样学习，以及怎样判断一个问题值不值得做。</p><p>具体的问题比宽泛的口号更容易开启讨论。可以带来一篇读不懂的论文、一段跑不顺的代码，或一次与预期不同的实验。</p></div><div class="principles"><div><span>01</span><h3>分享具体经验</h3><p>说清场景、方法与限制，让别人的尝试少走一点弯路。</p></div><div><span>02</span><h3>给分歧留位置</h3><p>不把个人判断写成全体共识，欢迎追问、补充和修正。</p></div><div><span>03</span><h3>让知识继续生长</h3><p>通过日报、资料和实际项目，把讨论变成持续积累。</p></div></div></section><section class="wrap join-panel"><div><div class="eyebrow">BUILD WITH US</div><h2>从你手上的一个问题开始。</h2><p>在 GitHub Discussions 发起交流；通过 Issue 提交内容建议与勘误；<br>也可以用日报模板整理一次讨论，再提交 Pull Request。</p></div><div class="button-row"><a class="button dark" href="https://github.com/goya4140/jlullm-ai-community/discussions" target="_blank" rel="noopener">参与社区讨论 ↗</a><a class="button outline" href="../workbench/">贡献一期日报 ↗</a></div></section>''',page='about',prefix='../')
+
+def build():
+    ds=[]
+    for p in sorted((ROOT/'content/digests').glob('*.json')):
+        d=json.loads(p.read_text())
+        if d.get('status')=='draft': continue
+        if d.get('status')!='published': raise ValueError(f'{p.name}: unknown or missing status')
+        try: validate(d)
+        except (ValueError,KeyError,TypeError) as exc: raise ValueError(f'{p.name}: {exc}') from exc
+        ds.append(d)
+    ds.sort(key=lambda d:(d['date'],d['id']),reverse=True)
+    if len({d['id'] for d in ds})!=len(ds): raise ValueError('Duplicate digest ID')
+    if OUT.exists(): shutil.rmtree(OUT)
+    OUT.mkdir()
+    shutil.copytree(ROOT/'web/assets',OUT/'assets')
+    shutil.copytree(ROOT/'templates',OUT/'templates')
+    pages={'index.html':home(ds),'daily/index.html':archive(ds),'workbench/index.html':workbench(),'about/index.html':about()}
+    for d in ds: pages[f'daily/{d["id"]}/index.html']=detail(d)
+    for file,body in pages.items():
+        p=OUT/file;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(body)
+    (OUT/'assets/example.json').write_text(json.dumps(ds[0],ensure_ascii=False,indent=2)+'\n' if ds else '{}')
+    # Embed the example so the desk works when opened as a local file, too.
+    desk=OUT/'workbench/index.html'
+    desk.write_text(desk.read_text().replace('<script src="../assets/workbench.js"',f'<script type="application/json" id="example-data">{safe_json(ds[0] if ds else {})}</script><script src="../assets/workbench.js"'))
+    (OUT/'.nojekyll').touch()
+    (OUT/'404.html').write_text(layout('页面未找到','<section class="wrap page-intro"><div class="eyebrow">404</div><h1>这个话题，还没到这里。</h1><p>页面可能已经移动，回到首页继续看看。</p><a class="button dark" href="/jlullm-ai-community/">返回社区首页 ↗</a></section>',prefix='/jlullm-ai-community/'))
+    print(f'Built {len(pages)+1} pages, {len(ds)} published digest(s) → {OUT}')
+    return ds
+
+if __name__=='__main__': build()

@@ -1,0 +1,16 @@
+{
+  "name": "JLULLM",
+  "full_name": "JLULLM AI 社区",
+  "tagline": "一起理解 AI，一起把想法做出来。",
+  "description": "围绕大模型、智能体与真实应用，交流研究、分享实践，把每次讨论变成下一次探索的起点。",
+  "repository": "https://github.com/goya4140/jlullm-ai-community",
+  "base_url": "https://goya4140.github.io/jlullm-ai-community/",
+  "topics": [
+    "大模型与后训练",
+    "Agent 与工具",
+    "具身智能",
+    "推理与系统",
+    "研究方法",
+    "AI 应用实践"
+  ]
+}
