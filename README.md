@@ -4,20 +4,18 @@
 
 - **社区主页**：https://goya4140.github.io/jlullm-ai-community/
 - **日报归档**：https://goya4140.github.io/jlullm-ai-community/daily/
-- **整理工作台**：https://goya4140.github.io/jlullm-ai-community/workbench/
 - **参与交流**：https://github.com/goya4140/jlullm-ai-community/discussions
 
 这是社区展示与知识积累的共同入口。首版包括社区介绍、可搜索与筛选的日报归档、文章页，以及聊天记录和录音转写两套日报模板。首篇为 2026-10-20 整理的具身智能与 AI 硬件交流特刊。
 
 ## 贡献一期日报
 
-1. 在工作台选择「聊天记录」或「录音转写」，粘贴文字材料，生成整理提示词。
-2. 把提示词交给你常用的 AI，取得 JSON 初稿。
-3. 将初稿导回工作台，预览并核对正文、摘录、时间、公开链接与编辑评论。
-4. 填写审核署名，导出已审核 JSON，放进 `content/digests/`。
-5. 运行构建与检查，将内容文件和 `docs/` 的变更一起提交到 `main`。GitHub Pages 会自动发布。
+1. 使用 `templates/chat-prompt.md` 或 `templates/recording-prompt.md`，整理聊天记录或录音转写。
+2. 把提示词交给你常用的 AI，取得 JSON 初稿；也可用 `scripts/new_digest.py` 从模板创建草稿。
+3. 在本地核对正文、摘录、时间、公开链接与编辑评论，填写审核署名并将状态设为 `published`。
+4. 将 JSON 放进 `content/digests/`，运行构建与检查，把内容文件和 `docs/` 的变更一起提交到 `main`。GitHub Pages 会自动发布。
 
-工作台不调用模型 API、不自动转写音频、不直接向 GitHub 写入数据；材料不会上传或保存到服务器。所有原始材料应放在本地 `.private/` 或仓库外，切勿加入 Git。日报必须由编辑核对后发布。
+所有原始材料应放在本地 `.private/` 或仓库外，切勿加入 Git。日报必须由编辑核对后发布。网站用于展示与阅读，模板和维护工具保留在仓库中。
 
 完整步骤与字段说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
@@ -32,7 +30,7 @@ python3 scripts/check_site.py
 python3 -m http.server 8000 --directory docs
 ```
 
-然后打开 http://localhost:8000/ 。`docs/` 是可直接托管的静态网站；也可在本地打开首页，工作台无需联网即可生成提示词与预览 JSON（剪贴板自动复制取决于浏览器权限）。
+然后打开 http://localhost:8000/ 。`docs/` 是可直接托管的静态网站。
 
 新建一期草稿：
 
@@ -46,13 +44,13 @@ python3 scripts/new_digest.py --type chat --date 2026-10-21 --slug agent-tools -
 ```text
 content/site.json            社区名称、介绍、仓库地址
 content/digests/*.json       唯一的日报内容源
-scripts/build.py            校验并生成首页、目录、文章页、工作台
+scripts/build.py            校验并生成首页、目录、文章页
 scripts/new_digest.py       从模板创建草稿
 scripts/check_site.py       静态链接、锚点和公开内容检查
 web/assets/                 样式与前端交互
 templates/                 聊天/录音 JSON、提示词、字段 schema
 docs/                      生成的网站，由 GitHub Pages 托管
- tests/                     发布门槛、草稿排除和文本转义检查
+tests/                     发布门槛、草稿排除和文本转义检查
 ```
 
 ## 发布与维护
@@ -65,4 +63,4 @@ Pages 使用 `main` 分支的 `/docs` 目录。维护者修改内容后运行构
 
 日报的信息组织参考 [AgentHub 日报](https://hqhq1025.github.io/agent_hub/daily/2026-10-19/group-1/)，本站的界面、内容模型与维护工具独立实现。
 
-页面视觉参照 [LifeLibra Lab](https://github.com/goya4140/LifeLibra-Lab) 的白底蓝色、宽留白与研究图片布局。首页研究桌图片复用自该参考仓库的 `website/public/hero-research-table.png`；JLULLM 标识、站点文案、日报与工作台独立维护。
+页面视觉参照 [LifeLibra Lab](https://github.com/goya4140/LifeLibra-Lab) 的白底蓝色、宽留白与研究图片布局。首页研究桌图片复用自该参考仓库的 `website/public/hero-research-table.png`；JLULLM 标识、站点文案、日报与维护模板独立维护。

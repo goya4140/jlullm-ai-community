@@ -1,13 +1,13 @@
 # 持续维护与日报贡献
 
-本站使用 JSON 作为内容源，由 Python 构建器生成静态 HTML。既可从浏览器工作台贡献，也可直接编辑文件。
+本站使用 JSON 作为内容源，由 Python 构建器生成静态 HTML。通过仓库中的模板与脚本维护日报。
 
 ## 一、从材料到初稿
 
 - **聊天记录**：保留消息时间和上下文；相同主题可跨消息合并。默认用匿名代号，不猜真实身份。
 - **录音**：先通过常用录音工具转写，再保留发言人和时间标记。不要只凭 AI 纪要写正文；重要数字、术语和引文应回听核对。
 - 将原始材料留在仓库外或 `.private/`（已忽略）。公开仓库只存已确定可以公开的内容。
-- 在 `/workbench/` 生成整理提示词，或使用 `templates/chat-prompt.md`、`templates/recording-prompt.md`。
+- 使用 `templates/chat-prompt.md`、`templates/recording-prompt.md`。
 
 ## 二、JSON 结构
 
@@ -39,9 +39,9 @@
 
 ## 三、审核与发布
 
-在工作台导入 JSON 并预览，核对来源、公开范围和观点归属，填写署名后导出。修改任何正文后，都要重新预览并审核。
+使用模板生成 JSON 初稿后，核对来源、公开范围和观点归属。修改任何正文后，都要重新在本地预览并审核。
 
-也可直接编辑文件：
+新建草稿：
 
 ```sh
 python3 scripts/new_digest.py --type recording --date 2026-10-21 --slug research-chat --title '本次交流标题'
